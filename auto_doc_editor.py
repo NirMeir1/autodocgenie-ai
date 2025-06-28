@@ -12,10 +12,17 @@ from typing import Iterable
 
 import openpyxl
 from docx import Document
+from docx.oxml.ns import qn
 
 OUTPUT_DIR = "AutomaticDocEditor"
 PLACEHOLDER = "____"
 RE_PLACEHOLDER = re.compile(re.escape(PLACEHOLDER))
+
+def _iter_text_elements(document: Document):
+    """Yield all ``<w:t>`` XML elements in *document* containing text."""
+
+    return document.element.body.iter(qn("w:t"))
+
 
 def replace_placeholders(doc: Document, replacements: Iterable[str]) -> Document:
     """Replace ``PLACEHOLDER`` text sequentially in *doc* with *replacements*."""
@@ -25,17 +32,9 @@ def replace_placeholders(doc: Document, replacements: Iterable[str]) -> Document
     def _sub(text: str) -> str:
         return RE_PLACEHOLDER.sub(lambda _: str(next(rep_iter, PLACEHOLDER)), text)
 
-    for paragraph in doc.paragraphs:
-        for run in paragraph.runs:
-            if PLACEHOLDER in run.text:
-                run.text = _sub(run.text)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        if PLACEHOLDER in run.text:
-                            run.text = _sub(run.text)
+    for text_elem in _iter_text_elements(doc):
+        if PLACEHOLDER in text_elem.text:
+            text_elem.text = _sub(text_elem.text)
     return doc
 
 def _generate_document(template_bytes: bytes, row: Iterable, output_dir: Path) -> None:
