@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -65,6 +64,8 @@ def process_documents(excel_path: str, template_path: str, workers: int | None =
         for row in ws.iter_rows(min_row=2, values_only=True):
             if row and any(value is not None for value in row[:4]):
                 executor.submit(_generate_document, template_bytes, row, output_dir)
+
+    wb.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fill Word template using Excel data.")
