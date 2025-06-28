@@ -1,56 +1,82 @@
 """Generate Word documents by filling placeholders using data from an Excel file."""
+
+from __future__ import annotations
+
+import argparse
+import io
 import os
-import pandas as pd
+import re
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Iterable
+
+import openpyxl
 from docx import Document
 
 OUTPUT_DIR = "AutomaticDocEditor"
+PLACEHOLDER = "____"
+RE_PLACEHOLDER = re.compile(re.escape(PLACEHOLDER))
 
-def replace_placeholders(doc, replacements):
-    """Replace '____' placeholders in the document with provided values sequentially."""
-    placeholder = "____"
-    index = 0
-    # Replace in paragraphs
+def replace_placeholders(doc: Document, replacements: Iterable[str]) -> Document:
+    """Replace ``PLACEHOLDER`` text sequentially in *doc* with *replacements*."""
+
+    rep_iter = iter(replacements)
+
+    def _sub(text: str) -> str:
+        return RE_PLACEHOLDER.sub(lambda _: str(next(rep_iter, PLACEHOLDER)), text)
+
     for paragraph in doc.paragraphs:
         for run in paragraph.runs:
-            while placeholder in run.text and index < len(replacements):
-                run.text = run.text.replace(placeholder, str(replacements[index]), 1)
-                index += 1
-    # Replace inside tables
+            if PLACEHOLDER in run.text:
+                run.text = _sub(run.text)
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
-                        while placeholder in run.text and index < len(replacements):
-                            run.text = run.text.replace(placeholder, str(replacements[index]), 1)
-                            index += 1
+                        if PLACEHOLDER in run.text:
+                            run.text = _sub(run.text)
     return doc
 
-def process_documents(excel_path, template_path):
+def _generate_document(template_bytes: bytes, row: Iterable, output_dir: Path) -> None:
+    """Create a document for a single Excel *row* using *template_bytes*."""
+
+    business_name, year, field3, field4 = row[:4]
+    doc = Document(io.BytesIO(template_bytes))
+    replace_placeholders(doc, [business_name, year, field3, field4])
+
+    output_path = output_dir / f"{business_name}.docx"
+    doc.save(output_path)
+    print(f"Created: {output_path}")
+
+
+def process_documents(excel_path: str, template_path: str, workers: int | None = None) -> None:
     """Generate Word documents by replacing placeholders based on Excel rows."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    df = pd.read_excel(excel_path)
+    output_dir = Path(OUTPUT_DIR)
+    output_dir.mkdir(exist_ok=True)
 
-    # Expect at least four columns: Business Name, Year, Field 3, and Field 4
-    for _, row in df.iterrows():
-        business_name = row[df.columns[0]]
-        year = row[df.columns[1]]
-        field3 = row[df.columns[2]]
-        field4 = row[df.columns[3]]
+    with open(template_path, "rb") as f:
+        template_bytes = f.read()
 
-        replacements = [business_name, year, field3, field4]
+    wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
+    ws = wb.active
 
-        doc = Document(template_path)
-        replace_placeholders(doc, replacements)
-
-        output_file = os.path.join(OUTPUT_DIR, f"{business_name}.docx")
-        doc.save(output_file)
-        print(f"Created: {output_file}")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row and any(value is not None for value in row[:4]):
+                executor.submit(_generate_document, template_bytes, row, output_dir)
 
 if __name__ == "__main__":
-    # Example usage; modify paths as needed
-    EXCEL_FILE = "input.xlsx"
-    TEMPLATE_FILE = "template.docx"
+    parser = argparse.ArgumentParser(description="Fill Word template using Excel data.")
+    parser.add_argument("excel_path", help="Path to the Excel (.xlsx) file")
+    parser.add_argument("template_path", help="Path to the Word (.docx) template")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of parallel workers (default: cpu count)",
+    )
+    args = parser.parse_args()
 
-    process_documents(EXCEL_FILE, TEMPLATE_FILE)
+    process_documents(args.excel_path, args.template_path, args.workers)
