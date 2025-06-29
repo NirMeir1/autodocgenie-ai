@@ -25,6 +25,24 @@ REQUIRED_HEADERS = [
     "שנים",
 ]
 
+def _find_header_indexes(ws: openpyxl.worksheet.worksheet.Worksheet) -> tuple[list[int], Iterable[tuple]]:
+    """Return column indexes for ``REQUIRED_HEADERS`` and remaining rows.
+
+    This scans rows until all headers are found (ignoring leading/trailing
+    whitespace) and returns the indexes along with an iterator positioned at
+    the first data row.
+    """
+
+    rows = ws.iter_rows(values_only=True)
+    for _row_idx, row in enumerate(rows, start=1):
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        try:
+            idxs = [cells.index(h) for h in REQUIRED_HEADERS]
+        except ValueError:
+            continue
+        return idxs, rows
+    raise KeyError(f"Missing columns: {', '.join(REQUIRED_HEADERS)}")
+
 def _format_value(value: Any) -> str:
     """Return a string for *value* without trailing ``.0`` for integers."""
     if value is None:
@@ -85,15 +103,10 @@ def process_documents(excel_path: str, template_path: str, workers: int | None =
     wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
     ws = wb.active
 
-    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
-    try:
-        indexes = [header_row.index(col) for col in REQUIRED_HEADERS]
-    except ValueError as exc:
-        missing = [col for col in REQUIRED_HEADERS if col not in header_row]
-        raise KeyError(f"Missing columns: {', '.join(missing)}") from exc
+    indexes, rows = _find_header_indexes(ws)
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        for row in ws.iter_rows(min_row=2, values_only=True):
+        for row in rows:
             values = [row[idx] if idx < len(row) else None for idx in indexes]
             if any(v is not None for v in values):
                 executor.submit(

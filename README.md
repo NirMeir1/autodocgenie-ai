@@ -26,6 +26,9 @@ python -m pip install python-docx openpyxl pandas
    - Numeric columns like "Year" may appear as floating-point values
      when read from Excel. The script removes any trailing `.0` so that
      values such as `2024` are written correctly.
+   - Column headers may appear on any row in the spreadsheet. The script
+     automatically searches for the required Hebrew headers and ignores
+     surrounding whitespace.
 
 2. **Run the script**
 
