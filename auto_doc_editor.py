@@ -16,6 +16,13 @@ from docx.oxml.ns import qn
 OUTPUT_DIR = "AutomaticDocEditor"
 PLACEHOLDER = "____"
 RE_PLACEHOLDER = re.compile(re.escape(PLACEHOLDER))
+REQUIRED_HEADERS = [
+    "שם העסק שם",
+    "עיר",
+    "כתובת",
+    "סכום",
+    "שנים",
+]
 
 def _format_value(value: Any) -> str:
     """Return a string for *value* without trailing ``.0`` for integers."""
@@ -44,21 +51,18 @@ def replace_placeholders(doc: Document, replacements: Iterable[Any]) -> Document
             text_elem.text = _sub(text_elem.text)
     return doc
 
-def _generate_document(template_bytes: bytes, row: Iterable, output_dir: Path) -> None:
-    """Create a document for a single Excel *row* using *template_bytes*."""
+def _generate_document(template_bytes: bytes, values: Iterable[Any], output_dir: Path) -> None:
+    """Create a document for a single Excel row using *template_bytes*."""
 
-    business_name, year, field3, field4 = row[:4]
+    values = list(values)
+    if not values:
+        return
+    business_name = _format_value(values[0])
     doc = Document(io.BytesIO(template_bytes))
     replace_placeholders(
         doc,
-        [
-            _format_value(business_name),
-            _format_value(year),
-            _format_value(field3),
-            _format_value(field4),
-        ],
+        [_format_value(v) for v in values],
     )
-
     output_path = output_dir / f"{business_name}.docx"
     doc.save(output_path)
     print(f"Created: {output_path}")
@@ -76,10 +80,23 @@ def process_documents(excel_path: str, template_path: str, workers: int | None =
     wb = openpyxl.load_workbook(excel_path, read_only=True, data_only=True)
     ws = wb.active
 
+    header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+    try:
+        indexes = [header_row.index(col) for col in REQUIRED_HEADERS]
+    except ValueError as exc:
+        missing = [col for col in REQUIRED_HEADERS if col not in header_row]
+        raise KeyError(f"Missing columns: {', '.join(missing)}") from exc
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         for row in ws.iter_rows(min_row=2, values_only=True):
-            if row and any(value is not None for value in row[:4]):
-                executor.submit(_generate_document, template_bytes, row, output_dir)
+            values = [row[idx] if idx < len(row) else None for idx in indexes]
+            if any(v is not None for v in values):
+                executor.submit(
+                    _generate_document,
+                    template_bytes,
+                    values,
+                    output_dir,
+                )
 
     wb.close()
 
