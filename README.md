@@ -21,7 +21,8 @@ python -m pip install python-docx openpyxl pandas
 
 1. **Prepare your files**
    - Excel file (`.xlsx`) with columns: Business Name, Year, Field 3, Field 4.
-   - Word template (`.docx`) containing `____` placeholders to be replaced.
+   - Word template (`.docx`) containing placeholders written as four or more
+     consecutive underscores.
    - Numeric columns like "Year" may appear as floating-point values
      when read from Excel. The script removes any trailing `.0` so that
      values such as `2024` are written correctly.

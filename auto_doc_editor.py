@@ -15,7 +15,8 @@ from docx.oxml.ns import qn
 
 OUTPUT_DIR = "AutomaticDocEditor"
 PLACEHOLDER = "____"
-RE_PLACEHOLDER = re.compile(re.escape(PLACEHOLDER))
+# Matches any sequence of four or more underscores
+RE_PLACEHOLDER = re.compile(r"_{4,}")
 REQUIRED_HEADERS = [
     "שם העסק שם",
     "עיר",
@@ -39,7 +40,11 @@ def _iter_text_elements(document: Document):
 
 
 def replace_placeholders(doc: Document, replacements: Iterable[Any]) -> Document:
-    """Replace ``PLACEHOLDER`` text sequentially in *doc* with *replacements*."""
+    """Replace sequences of underscores in *doc* with ``replacements``.
+
+    Any run of four or more underscores is considered a placeholder and
+    replaced sequentially with the next value.
+    """
 
     rep_iter = iter(replacements)
 
@@ -47,7 +52,7 @@ def replace_placeholders(doc: Document, replacements: Iterable[Any]) -> Document
         return RE_PLACEHOLDER.sub(lambda _: _format_value(next(rep_iter, PLACEHOLDER)), text)
 
     for text_elem in _iter_text_elements(doc):
-        if PLACEHOLDER in text_elem.text:
+        if RE_PLACEHOLDER.search(text_elem.text):
             text_elem.text = _sub(text_elem.text)
     return doc
 
