@@ -43,7 +43,9 @@ python -m pip install python-docx openpyxl pandas
 
 3. **Results**
    - Output documents are created inside the `AutomaticDocEditor` directory.
-   - Each document is named after the corresponding Business Name.
+   - Each document is named after the corresponding Business Name. Any trailing
+     spaces or characters illegal on Windows (``:/*?"<>|``) are removed to
+     avoid collisions or save errors.
 
 Example:
 

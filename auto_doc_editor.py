@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable, Any
 
@@ -74,21 +74,40 @@ def replace_placeholders(doc: Document, replacements: Iterable[Any]) -> Document
             text_elem.text = _sub(text_elem.text)
     return doc
 
+INVALID_CHARS_RE = re.compile(r'[\\/*?:"<>|]')
+
+def _sanitize_name(name: str) -> str:
+    """Return *name* trimmed of whitespace and illegal characters."""
+    cleaned = INVALID_CHARS_RE.sub("", name).strip()
+    return cleaned or "document"
+
+def _unique_path(path: Path) -> Path:
+    """Return a unique Path, appending ``_N`` if the file already exists."""
+    counter = 1
+    new_path = path
+    while new_path.exists():
+        new_path = path.with_name(f"{path.stem}_{counter}{path.suffix}")
+        counter += 1
+    return new_path
+
 def _generate_document(template_bytes: bytes, values: Iterable[Any], output_dir: Path) -> None:
     """Create a document for a single Excel row using *template_bytes*."""
 
     values = list(values)
     if not values:
         return
-    business_name = _format_value(values[0])
+    business_name = _sanitize_name(_format_value(values[0]))
     doc = Document(io.BytesIO(template_bytes))
     replace_placeholders(
         doc,
         [_format_value(v) for v in values],
     )
-    output_path = output_dir / f"{business_name}.docx"
-    doc.save(output_path)
-    print(f"Created: {output_path}")
+    output_path = _unique_path(output_dir / f"{business_name}.docx")
+    try:
+        doc.save(output_path)
+        print(f"Created: {output_path}")
+    except Exception as exc:
+        print(f"Failed to save {output_path.name}: {exc}")
 
 
 def process_documents(excel_path: str, template_path: str, workers: int | None = None) -> None:
@@ -105,16 +124,24 @@ def process_documents(excel_path: str, template_path: str, workers: int | None =
 
     indexes, rows = _find_header_indexes(ws)
 
+    futures = []
     with ThreadPoolExecutor(max_workers=workers) as executor:
         for row in rows:
             values = [row[idx] if idx < len(row) else None for idx in indexes]
             if any(v is not None for v in values):
-                executor.submit(
-                    _generate_document,
-                    template_bytes,
-                    values,
-                    output_dir,
+                futures.append(
+                    executor.submit(
+                        _generate_document,
+                        template_bytes,
+                        values,
+                        output_dir,
+                    )
                 )
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                print(f"Error: {exc}")
 
     wb.close()
 
